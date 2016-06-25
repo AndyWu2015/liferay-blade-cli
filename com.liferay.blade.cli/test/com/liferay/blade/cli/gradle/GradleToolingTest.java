@@ -17,6 +17,7 @@
 package com.liferay.blade.cli.gradle;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -39,21 +40,6 @@ public class GradleToolingTest {
 	}
 
 	@Test
-	public void testCheckLatestArtifactVersionOffline() throws Exception {
-		File file = GradleTooling.findLatestAvailableArtifact(
-			"group: 'com.liferay', name: 'com.liferay.gradle.plugins.workspace', version: '1+', classifier: 'sources', ext: 'jar'",
-			new File("test-localrepo").toURI().toURL().toExternalForm());
-
-		String name = file.getName();
-
-		assertNotNull(file);
-		assertTrue(file.exists());
-		assertTrue(name.startsWith("com.liferay.gradle.plugins.workspace"));
-		assertTrue(name.endsWith("sources.jar"));
-		assertTrue(name.contains("1.0.8"));
-	}
-
-	@Test
 	public void testCheckLatestArtifactVersionOnline() throws Exception {
 		File file = GradleTooling.findLatestAvailableArtifact(
 			"group: 'com.liferay', name: 'com.liferay.gradle.plugins.workspace', version: '1+', classifier: 'sources', ext: 'jar'");
@@ -64,7 +50,7 @@ public class GradleToolingTest {
 		assertTrue(file.exists());
 		assertTrue(name.startsWith("com.liferay.gradle.plugins.workspace"));
 		assertTrue(name.endsWith("sources.jar"));
-		assertEquals(name, true, name.contains("1.0.25"));
+		assertEquals(name, true, name.matches(".*-1\\.0\\.[0-9]+-.*"));
 	}
 
 	@Test
@@ -85,4 +71,20 @@ public class GradleToolingTest {
 		assertEquals(17, files.size());
 	}
 
+	@Test
+	public void testGetPluginClassNames() throws Exception {
+		Set<String> pluginClassNames = GradleTooling.getPluginClassNames (
+			new File("bin_test"), new File("."));
+
+		assertNotNull(pluginClassNames);
+		assertTrue(pluginClassNames.contains("aQute.bnd.gradle.BndPlugin"));
+	}
+
+	@Test
+	public void testIsLiferayModule() throws Exception {
+		boolean isModule = GradleTooling.isLiferayModule (
+			new File("bin_test"), new File("."));
+
+		assertFalse(isModule);
+	}
 }

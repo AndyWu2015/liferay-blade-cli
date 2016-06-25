@@ -53,14 +53,11 @@ public class CreateCommand {
 		"Creates a new Liferay module project from several available " +
 			"templates.";
 
-	public static final String DEFAULT_TEMPLATES_VERSION = "1.0.1";
+	public static final String TEMPLATES_VERSION = "1+";
 
 	public CreateCommand(blade blade, CreateOptions options) {
 		_blade = blade;
 		_options = options;
-		_templatesVersion =
-			options.version() == null ?
-				DEFAULT_TEMPLATES_VERSION : options.version();
 	}
 
 	public void execute() throws Exception {
@@ -76,10 +73,25 @@ public class CreateCommand {
 		if (template == null) {
 			template = "mvcportlet";
 		}
+		else if (!isExistingTemplate(template)) {
+				addError(
+					"Create", "the template "+template+" is not in the list");
+				return;
+		}
 
-		File dir = _options.dir() != null ? _options.dir() : getDefaultDir();
 		String name = args.remove(0);
-		File workDir = Processor.getFile(dir, name);
+		final File dir =
+			_options.dir() != null ? _options.dir() : getDefaultDir();
+		final File workDir = Processor.getFile(dir, name);
+
+		if(!checkDir(workDir)) {
+			addError(
+				"Create", name+" is not empty or it is a file." +
+				" Please clean or delete it then run again");
+			return;
+		}
+
+		final boolean isWorkspace = Util.isWorkspace(dir);
 
 		name = workDir.getName();
 
@@ -171,25 +183,39 @@ public class CreateCommand {
 				subs.put("_service_", name + "-service");
 				subs.put("_web_", name + "-web");
 			}
+
+			if (isWorkspace) {
+				final Path workspacePath = Util.getWorkspaceDir(
+					dir).getAbsoluteFile().toPath();
+
+				final Path dirPath = dir.getAbsoluteFile().toPath();
+
+				final String relativePath = workspacePath.relativize(
+					dirPath).toString();
+
+				final String apiPath =
+					":" + relativePath.replaceAll("\\\\", "/").replaceAll("\\/", ":") + ":" + name;
+
+				subs.put("_api_path_", apiPath);
+			}
+			else {
+				subs.put("_api_path_", "");
+			}
+
 			subs.put("_portlet_", packageName + ".portlet");
 			subs.put(
 				"_portletpackage_",
 				packageName.replaceAll("\\.", "/") + "/portlet");
-
-			if (!classname.contains("Portlet")) {
-				classname += "Portlet";
-			}
 		}
 		else if ("activator".equals(template)) {
 			if (!classname.contains("Activator")) {
 				classname += "Activator";
 			}
 		}
-		else if ("portlet".equals(template) ||
-				 "mvcportlet".equals(template)) {
 
-			if (!classname.contains("Portlet")) {
-				classname += "Portlet";
+		if ("portlet".equals(template) || "mvcportlet".equals(template)) {
+			if (classname.endsWith("Portlet")) {
+				classname = classname.replaceAll("Portlet$", "");
 			}
 		}
 
@@ -229,15 +255,13 @@ public class CreateCommand {
 
 		in.close();
 
-		if (Util.isWorkspace(dir)) {
+		if (isWorkspace) {
 			final Pattern buildGlob = Pattern.compile(
-				"^workspace/" + template + "/.*|\\...+/build.gradle");
+				"^workspace/" + template + "/.*|\\...+/.*");
 
 			in = new FileInputStream(moduleTemplatesZip);
 
-			copy(
-				"workspace", template, workDir, in, buildGlob, true,
-				subs);
+			copy("workspace", template, workDir, in, buildGlob, true, subs);
 
 			in.close();
 
@@ -296,21 +320,17 @@ public class CreateCommand {
 					"--listtemplates>"
 		)
 		public String template();
-
-		@Description(
-			"Specify a custom version of project templates to download.")
-		public String version();
 	}
 
 	File getGradleTemplatesZip() throws Exception {
 		trace(
-			"Connecting to repository to find version " + _templatesVersion +
+			"Connecting to repository to find version " + TEMPLATES_VERSION +
 				" gradle templates.");
 
 		File zipFile = GradleTooling.findLatestAvailableArtifact(
 			"group: 'com.liferay', " +
-				"name: 'com.liferay.gradle.templates', " +
-					"version: '" + _templatesVersion + "', classifier: " +
+				"name: 'com.liferay.gradle.templates', " + "version: '" +
+					TEMPLATES_VERSION + "', classifier: " +
 						"'sources', ext: 'jar'");
 
 		trace("Found gradle templates " + zipFile);
@@ -330,6 +350,23 @@ public class CreateCommand {
 		String parentPath = parentDir.getCanonicalPath();
 
 		return currentPath.startsWith(parentPath);
+	}
+
+	private boolean checkDir(File file) {
+		if(file.exists()) {
+			if(!file.isDirectory()) {
+				return false;
+			}
+			else {
+				File[] children = file.listFiles();
+
+				if(children != null && children.length > 0) {
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	private void copy(
@@ -409,6 +446,26 @@ public class CreateCommand {
 		return name;
 	}
 
+	private List<String> getTemplates() throws Exception {
+		List<String> templateNames = new ArrayList<>();
+		File templatesZip = getGradleTemplatesZip();
+
+		try (Jar jar = new Jar(templatesZip)) {
+			Map<String, Map<String, Resource>> directories =
+				jar.getDirectories();
+
+			for (String key : directories.keySet()) {
+				Path path = Paths.get(key);
+
+				if (path.getNameCount() == 2 && path.startsWith("standalone")) {
+					templateNames.add(path.getName(1).toString());
+				}
+			}
+		}
+
+		return templateNames;
+	}
+
 	private boolean isEmpty(String str) {
 		if (str == null) {
 			return true;
@@ -416,6 +473,19 @@ public class CreateCommand {
 
 		if (str.trim().isEmpty()) {
 			return true;
+		}
+
+		return false;
+	}
+
+	private boolean isExistingTemplate(String templateName) throws Exception
+	{
+		List<String> templates = getTemplates();
+
+		for (String template : templates) {
+			if (templateName.equals(template)) {
+				return true;
+			}
 		}
 
 		return false;
@@ -429,20 +499,7 @@ public class CreateCommand {
 	}
 
 	private void listTemplates() throws Exception {
-		List<String> templateNames = new ArrayList<>();
-		File templatesZip = getGradleTemplatesZip();
-
-		try (Jar jar = new Jar(templatesZip)) {
-			Map<String, Map<String, Resource>> directories = jar.getDirectories();
-
-			for (String key : directories.keySet()) {
-				Path path = Paths.get(key);
-
-				if (path.getNameCount() == 2 && path.startsWith("standalone")) {
-					templateNames.add(path.getName(1).toString());
-				}
-			}
-		}
+		List<String> templateNames = getTemplates();
 
 		for (String name : templateNames) {
 			_blade.out().println(name);
@@ -472,6 +529,5 @@ public class CreateCommand {
 
 	private final blade _blade;
 	private final CreateOptions _options;
-	private final String _templatesVersion;
 
 }
