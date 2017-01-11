@@ -20,7 +20,11 @@ import com.liferay.blade.api.SearchResult;
 import com.liferay.blade.api.XMLFile;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.wst.sse.core.StructuredModelManager;
@@ -32,6 +36,7 @@ import org.w3c.dom.NodeList;
 
 /**
  * @author Gregory Amerson
+ * @author Andy Wu
  */
 @Component(property = "file.extension=xml")
 public class SSEXMLFile extends WorkspaceFile implements XMLFile {
@@ -82,5 +87,73 @@ public class SSEXMLFile extends WorkspaceFile implements XMLFile {
 		return _results;
 	}
 
+	@Override
+	public Collection<SearchResult> searchChildren(String parentNodeName,
+			Map<String, String> childrenNodeNameValueMap) {
+
+		final List<SearchResult> results = new ArrayList<>();
+
+		final IFile xmlFile = getIFile(_file);
+		IDOMModel domModel = null;
+
+		try {
+			domModel = (IDOMModel) StructuredModelManager.getModelManager().getModelForRead(xmlFile);
+
+			final IDOMDocument document = domModel.getDocument();
+
+			final NodeList elements = document.getElementsByTagName(parentNodeName);
+
+			if (elements == null || elements.getLength() == 0)
+				return results;
+
+			for (int i = 0; i < elements.getLength(); i++) {
+				final IDOMElement element = (IDOMElement) elements.item(i);
+
+				final Map<String, NodeList> nodeLists = new HashMap<String, NodeList>();
+
+				final Set<String> keys = childrenNodeNameValueMap.keySet();
+
+				boolean fullMatch = true;
+
+				for (String key : keys) {
+					final NodeList nodeList = element.getElementsByTagName(key);
+
+					if (nodeList != null && nodeList.getLength() == 1) {
+						nodeLists.put(key, nodeList);
+
+						final IDOMElement node = (IDOMElement) nodeList.item(0);
+
+						final String nodeContent = node.getTextContent();
+						final String exceptedContent = childrenNodeNameValueMap.get(key);
+
+						if (!exceptedContent.equals(nodeContent)) {
+							fullMatch = false;
+						}
+					}
+				}
+
+				if (fullMatch) {
+					int startOffset = element.getStartOffset();
+					int endOffset = element.getEndOffset();
+					int startLine = document.getStructuredDocument().getLineOfOffset(startOffset) + 1;
+					int endLine = document.getStructuredDocument().getLineOfOffset(endOffset) + 1;
+
+					SearchResult result = new SearchResult(_file, "startOffset:" + startOffset, startOffset,
+							endOffset, startLine, endLine, true);
+
+					results.add(result);
+				}
+			}
+		}
+		catch (Exception e) {
+		}
+		finally {
+			if (domModel != null) {
+				domModel.releaseFromRead();
+			}
+		}
+
+		return results;
+	}
 
 }
